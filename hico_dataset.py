@@ -4,17 +4,20 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 
+from hoi import HOI
+
 
 class HICODataset(Dataset):
     train_image_dir = 'images/train2015'
     test_image_dir = 'images/test2015'
     annot_file = 'anno.mat'
+    annot_format = ['nname', 'vname', 'vname_ing', 'syn', 'def', 'synset', 'add_def']
 
     def __init__(self, hico_root_dir, train=True):
         self.hico_root_dir = hico_root_dir
         self.train = train
         self.annotation_dict = scipy.io.loadmat(self.hico_root_dir / self.annot_file)
-        self.hoi_list = self.annotation_dict['list_action']
+        self.hoi_classes = self.__convert_hoi_classes(self.annotation_dict['list_action'])
 
         if self.train:
             self.image_dir = self.hico_root_dir / self.train_image_dir
@@ -34,6 +37,17 @@ class HICODataset(Dataset):
         target = self.hoi_targets[:, index]
 
         return image, target
+
+    def __convert_hoi_classes(self, classes):
+        hoi_classes = []
+        for entry in classes:
+            noun = entry.item()[0].item()
+            verb = entry.item()[1].item()
+            verb_ing = entry.item()[2].item()
+            synonyms = entry.item()[3].tolist()
+            definition = entry.item()[4].tolist()
+            hoi_classes.append(HOI(noun, verb, verb_ing, synonyms, definition))
+        return hoi_classes
 
 
 if __name__ == '__main__':
