@@ -11,7 +11,7 @@ class HICODataset(Dataset):
     train_image_dir = 'images/train2015'
     test_image_dir = 'images/test2015'
     annot_file = 'anno.mat'
-    annot_format = ['nname', 'vname', 'vname_ing', 'syn', 'def', 'synset', 'add_def']
+    plural_nouns = ('scissors', 'skis')
 
     def __init__(self, hico_root_dir, train=True):
         self.hico_root_dir = hico_root_dir
@@ -38,6 +38,11 @@ class HICODataset(Dataset):
 
         return image, target
 
+    @staticmethod
+    def get_positive_indices(target):
+        positive_indices = torch.nonzero(target == +1).squeeze().tolist()
+        return positive_indices if isinstance(positive_indices, list) else [positive_indices]
+
     def __convert_hoi_classes(self, classes):
         hoi_classes = []
         for entry in classes:
@@ -46,12 +51,13 @@ class HICODataset(Dataset):
             verb_ing = entry.item()[2].item()
             synonyms = entry.item()[3].tolist()
             definition = entry.item()[4].tolist()
-            hoi_classes.append(HOI(noun, verb, verb_ing, synonyms, definition))
+            noun_is_plural = noun in self.plural_nouns
+            hoi_classes.append(HOI(noun, verb, verb_ing, synonyms, definition, noun_is_plural))
         return hoi_classes
 
 
 if __name__ == '__main__':
     current_folder = Path(__file__).parent
-    dataset = HICODataset(hico_root_dir=current_folder/'hico_20150920')
+    dataset = HICODataset(hico_root_dir=current_folder / 'hico_20150920')
     print(len(dataset))
     print(dataset[2])

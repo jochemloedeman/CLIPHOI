@@ -1,8 +1,6 @@
-import os
 import clip
 import torch
 from pathlib import Path
-# Load the model
 from hico_dataset import HICODataset
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -12,11 +10,12 @@ model, preprocess = clip.load('ViT-B/32', device)
 hico = HICODataset(Path(__file__).parent / 'hico_20150920', train=False)
 
 # Prepare the inputs
-image, class_id = hico[3637]
+image, target = hico[46]
+for hoi in hico.hoi_classes:
+    print(hoi.hoi_phrase)
+positive_indices = hico.get_positive_indices(target)
 image_input = preprocess(image).unsqueeze(0).to(device)
-text_inputs = torch.cat([clip.tokenize(f"a person {hoi.verb_ing} {hoi.article} {hoi.noun}") for hoi in hico.hoi_classes]).to(device)
-hois = [f"a person {hoi.verb_ing} {hoi.article} {hoi.noun}" for hoi in hico.hoi_classes]
-
+text_inputs = torch.cat([clip.tokenize(f"a person {hoi.hoi_phrase}") for hoi in hico.hoi_classes]).to(device)
 # Calculate features
 with torch.no_grad():
     image_features = model.encode_image(image_input)
@@ -31,4 +30,7 @@ values, indices = similarity[0].topk(5)
 # Print the result
 print("\nTop predictions:\n")
 for value, index in zip(values, indices):
-    print(f"{hico.hoi_classes[index]:>16s}: {100 * value.item():.2f}%")
+    print(f"{hico.hoi_classes[index].hoi_phrase}: {100 * value.item():.2f}%")
+print("\nGround truths:\n")
+for index in positive_indices:
+    print(hico.hoi_classes[index].hoi_phrase)
