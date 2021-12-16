@@ -1,13 +1,16 @@
 import clip
 import torch
 from pathlib import Path
+
+from torchvision import transforms
+
 from hico_dataset import HICODataset
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load('ViT-B/32', device)
 
 # Download the dataset
-hico = HICODataset(Path(__file__).parent / 'hico_20150920', train=False)
+hico = HICODataset(Path(__file__).parent / 'hico_20150920', train=False, transform=transforms.Compose([transforms.ToTensor()]))
 
 # Prepare the inputs
 image, target = hico[46]

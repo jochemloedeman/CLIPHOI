@@ -12,21 +12,24 @@ class HICODataset(Dataset):
     test_image_dir = 'images/test2015'
     annot_file = 'anno.mat'
     plural_nouns = ('scissors', 'skis')
+    no_interaction_verb = 'no_interaction'
 
-    def __init__(self, hico_root_dir, train=True):
+    def __init__(self, hico_root_dir, transform=None, train=True, exclude_no_interaction=False):
         self.hico_root_dir = hico_root_dir
         self.train = train
+        self.transform = transform
+        self.exclude_no_interaction = exclude_no_interaction
         self.annotation_dict = scipy.io.loadmat(self.hico_root_dir / self.annot_file)
-        self.hoi_classes = self.__convert_hoi_classes(self.annotation_dict['list_action'])
+        self.hoi_classes, self.interaction_indices = self.__convert_hoi_classes(self.annotation_dict['list_action'])
 
         if self.train:
             self.image_dir = self.hico_root_dir / self.train_image_dir
             self.image_filenames = self.annotation_dict['list_train']
-            self.hoi_targets = torch.from_numpy(self.annotation_dict['anno_train'])
+            self.hoi_targets = torch.from_numpy(self.annotation_dict['anno_train'])[self.interaction_indices, :]
         else:
             self.image_dir = self.hico_root_dir / self.test_image_dir
             self.image_filenames = self.annotation_dict['list_test']
-            self.hoi_targets = torch.from_numpy(self.annotation_dict['anno_test'])
+            self.hoi_targets = torch.from_numpy(self.annotation_dict['anno_test'])[self.interaction_indices, :]
 
     def __len__(self):
         return len(self.image_filenames)
@@ -35,25 +38,26 @@ class HICODataset(Dataset):
         image_filename = self.image_filenames[index].item().item()
         image = Image.open(Path(self.image_dir) / image_filename)
         target = self.hoi_targets[:, index]
-
+        image = self.transform(image) if self.transform is not None else image
         return image, target
-
-    @staticmethod
-    def get_positive_indices(target):
-        positive_indices = torch.nonzero(target == +1).squeeze().tolist()
-        return positive_indices if isinstance(positive_indices, list) else [positive_indices]
 
     def __convert_hoi_classes(self, classes):
         hoi_classes = []
-        for entry in classes:
+        interaction_indices = []
+        for hoi_index, entry in enumerate(classes):
             noun = entry.item()[0].item()
             verb = entry.item()[1].item()
             verb_ing = entry.item()[2].item()
             synonyms = entry.item()[3].tolist()
             definition = entry.item()[4].tolist()
             noun_is_plural = noun in self.plural_nouns
-            hoi_classes.append(HOI(noun, verb, verb_ing, synonyms, definition, noun_is_plural))
-        return hoi_classes
+            if verb != self.no_interaction_verb or not self.exclude_no_interaction:
+                hoi_classes.append(HOI(noun, verb, verb_ing, synonyms, definition, noun_is_plural))
+                interaction_indices.append(hoi_index)
+
+        return hoi_classes, torch.LongTensor(interaction_indices)
+
+    # def get_hoi_statistics(self):
 
 
 if __name__ == '__main__':
