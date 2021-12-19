@@ -1,3 +1,4 @@
+import json
 import torch
 from torchmetrics import Metric
 from torchmetrics.functional import retrieval_average_precision
@@ -6,20 +7,23 @@ from torchmetrics.utilities.data import get_group_indexes
 
 class HICOmAP(Metric):
 
-    def __init__(self, hoi_classes, dist_sync_on_step=False,
+    def __init__(self, hico_dataset, dist_sync_on_step=False,
                  known_object_mode=False, exclude_no_interaction=False):
+
         super().__init__(dist_sync_on_step=dist_sync_on_step)
 
-        self.hoi_classes = hoi_classes
+        self.hico_dataset = hico_dataset
         self.known_object_mode = known_object_mode
         self.exclude_no_interaction = exclude_no_interaction
+
         self.add_state("indexes", default=[], dist_reduce_fx=None)
         self.add_state("preds", default=[], dist_reduce_fx=None)
         self.add_state("target", default=[], dist_reduce_fx=None)
-        self.aps = None
+
+        self._aps = None
+        self._mean_ap = None
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
-        # update metric states
         self.indexes.append(torch.arange(preds.shape[1]).repeat(preds.shape[0]))
         self.preds.append(preds)
         self.target.append(target)
@@ -27,17 +31,17 @@ class HICOmAP(Metric):
         assert preds.shape == target.shape
 
     def compute(self):
-        # compute final result
-        ap_per_hoi = self.compute_ap_per_hoi()
-        return torch.stack([x for x in ap_per_hoi]).mean() if ap_per_hoi else torch.tensor(0.0)
+        ap_per_hoi = self._compute_ap_per_hoi()
+        mean_ap = torch.stack([x for x in ap_per_hoi]).mean() if ap_per_hoi else torch.tensor(0.0)
+        self._mean_ap = mean_ap.item()
+        return mean_ap
 
-    def compute_ap_per_hoi(self):
-        # compute final result
+    def _compute_ap_per_hoi(self):
         indexes = torch.cat(self.indexes, dim=0)
         preds = torch.flatten(torch.cat(self.preds, dim=0))
         target = torch.flatten(torch.cat(self.target, dim=0))
 
-        included_pairs = self.get_included_pairs(target)
+        included_pairs = self._get_included_pairs(target)
         indexes, preds, target = (indexes[included_pairs], preds[included_pairs], target[included_pairs])
         target = torch.where(target == 1, 1, 0)
         aps = []
@@ -49,11 +53,11 @@ class HICOmAP(Metric):
 
             aps.append(retrieval_average_precision(mini_preds, mini_target))
 
-        self.aps = [ap.item() for ap in aps]
+        self._aps = [ap.item() for ap in aps]
 
         return aps
 
-    def get_included_pairs(self, target):
+    def _get_included_pairs(self, target):
         if self.known_object_mode:
             mask = (target != 0) & (~torch.isnan(target))
         else:
@@ -61,14 +65,17 @@ class HICOmAP(Metric):
 
         return torch.nonzero(mask, as_tuple=True)
 
-    def get_ap_per_hoi(self):
-        hoi_phrases = [hoi.hoi_phrase for hoi in self.hoi_classes]
-        ap_per_hoi = dict(zip(hoi_phrases, self.aps))
-        sorted_ap_per_hoi = {k: v for k, v in sorted(ap_per_hoi.items(), key=lambda item: item[1], reverse=True)}
+    def _get_ap_per_hoi(self, include_statistics=True):
+        hoi_phrases = [hoi.hoi_phrase for hoi in self.hico_dataset.hoi_classes]
+        ap_per_hoi = dict(zip(hoi_phrases, self._aps))
+        if include_statistics:
+            statistics = self.hico_dataset.get_hoi_statistics()
+            sorted_ap_per_hoi = {key: (value, statistics[key]) for key, value in sorted(ap_per_hoi.items(), key=lambda item: item[1], reverse=True)}
+        else:
+            sorted_ap_per_hoi = {k: v for k, v in sorted(ap_per_hoi.items(), key=lambda item: item[1], reverse=True)}
         return sorted_ap_per_hoi
 
-
-if __name__ == '__main__':
-    map = HICOmAP(known_object_mode=True)
-    target_1 = torch.tensor([1.0, 0.0, float('nan')])
-    print(map.get_included_pairs(target_1))
+    def export_to_json(self, filename):
+        json_list = [{'map': self._mean_ap}, self._get_ap_per_hoi(include_statistics=True)]
+        with open(f'{filename}.json', 'w') as f:
+            json.dump(json_list, f, indent=4)
