@@ -99,9 +99,9 @@ class HICOmAP(Metric):
 
         if include_statistics:
             statistics = self.hico_dataset.get_hoi_statistics()
-            ap_per_hoi = {hoi: (ap, statistics[hoi]) for hoi, ap in ap_per_hoi}
+            ap_per_hoi = {hoi: (ap.item(), statistics[hoi]) for hoi, ap in ap_per_hoi.items()}
 
-        sorted_ap_per_hoi = {key: value.item() for key, value in
+        sorted_ap_per_hoi = {key: value for key, value in
                              sorted(ap_per_hoi.items(), key=lambda item: item[1], reverse=True)}
 
         return sorted_ap_per_hoi
