@@ -1,17 +1,27 @@
-import json
 import clip
 import torch
+import torchmetrics
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from hico_dataset import HICODataset
-from pathlib import Path
-
-from hicomap import HICOmAP
+from torch.utils.data import Dataset
 
 
 class CLIPEvaluator(object):
+    def __init__(self, dataset: Dataset, metric: torchmetrics.Metric, device: str, batch_size: int) -> None:
+        """
+        Class that is intended for evaluating OpenAI's CLIP (https://github.com/openai/CLIP) on a PyTorch Dataset,
+        with a given TorchMetrics metric
 
-    def __init__(self, dataset, metric, device, batch_size):
+        Args:
+            dataset:
+                A PyTorch Dataset
+            metric:
+                A TorchMetrics metric
+            device:
+                Set the device on which the evaluation is executed
+            batch_size:
+                Set the batch size for the evaluation procedure
+        """
         self.device = device
         self.dataset = dataset
         self.metric = metric
@@ -19,7 +29,12 @@ class CLIPEvaluator(object):
         self.model, self.preprocessor = clip.load('ViT-B/32', self.device)
         self.final_metric = None
 
-    def evaluate(self):
+    def evaluate(self) -> None:
+        """Iterates through a DataLoader that is created from the given Dataset.
+        In each iteration, the images are passed through the CLIP image encoder. The resulting embeddings are then
+        compared to the HOI class embeddings to obtain logits per image. A distribution over the HOI classes is
+        computed using a softmax.
+        """
         dataloader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=False)
 
         for images, target in tqdm(dataloader):

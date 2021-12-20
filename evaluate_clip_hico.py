@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--ko', default=False, type=bool,
                     help='Evaluate in known object mode')
-parser.add_argument('--exclude_no_interaction', default=False, type=bool,
+parser.add_argument('--exclude_no_interaction', default=True, type=bool,
                     help='Exclude no interaction classes')
 parser.add_argument('--train', default=False, type=bool,
                     help='Use the train set for evaluation')
@@ -27,8 +27,7 @@ hico_dataset = HICODataset(Path(__file__).parent / 'hico_20150920',
                            transform=preprocess,
                            exclude_no_interaction=args.exclude_no_interaction)
 
-hico_map = HICOmAP(hico_dataset=hico_dataset, known_object_mode=args.ko,
-                   exclude_no_interaction=args.exclude_no_interaction).to(device)
+hico_map = HICOmAP(hico_dataset=hico_dataset, known_object_mode=args.ko).to(device)
 
 evaluator = CLIPEvaluator(device=device, dataset=hico_dataset,
                           metric=hico_map, batch_size=args.batch_size)
