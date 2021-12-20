@@ -3,7 +3,7 @@ import torch
 import argparse
 from pathlib import Path
 from hico_dataset import HICODataset
-from hico_evaluator import CLIPEvaluator
+from clip_evaluator import CLIPEvaluator
 from hicomap import HICOmAP
 
 parser = argparse.ArgumentParser()
