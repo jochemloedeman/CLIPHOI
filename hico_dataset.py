@@ -40,8 +40,8 @@ class HICODataset(Dataset):
         self.train = train
         self.exclude_no_interaction = exclude_no_interaction
 
-        self.image_dir = self.hico_root_dir / f'images/{self.subset}2015'
         self.subset = 'train' if self.train else 'test'
+        self.image_dir = self.hico_root_dir / f'images/{self.subset}2015'
         self.annotation_dict = scipy.io.loadmat(str(self.hico_root_dir / self.annot_file))
         self.hoi_classes, self.interaction_class_indices = self._create_hoi_classes(
             self.annotation_dict['list_action'])
