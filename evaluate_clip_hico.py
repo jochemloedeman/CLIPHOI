@@ -2,15 +2,15 @@ import clip
 import torch
 import argparse
 from pathlib import Path
-from hico_dataset import HICODataset
-from clip_evaluator import CLIPEvaluator
-from hicomap import HICOmAP
+from datasets.hico_dataset import HICODataset
+from evaluators.clip_evaluator import CLIPEvaluator
+from metrics.hicomap import HICOmAP
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--ko', default=False, type=bool,
                     help='Evaluate in known object mode')
-parser.add_argument('--exclude_no_interaction', default=True, type=bool,
+parser.add_argument('--exclude_no_interaction', default=False, type=bool,
                     help='Exclude no interaction classes')
 parser.add_argument('--train', default=False, type=bool,
                     help='Use the train set for evaluation')
@@ -20,9 +20,9 @@ parser.add_argument('--batch_size', default=512, type=int,
 args = parser.parse_args()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model, preprocess = clip.load('ViT-B/32', device)
+model, preprocess = clip.load('ViT-B/16', device)
 
-hico_dataset = HICODataset(Path(__file__).parent / 'hico_20150920',
+hico_dataset = HICODataset(Path(__file__).parent / 'data' / 'hico_20150920',
                            train=args.train,
                            transform=preprocess,
                            exclude_no_interaction=args.exclude_no_interaction)
