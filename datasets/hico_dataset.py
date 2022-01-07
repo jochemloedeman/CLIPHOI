@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from hoi import HOI
+from hoi.hoi import HOI
 
 
 class HICODataset(Dataset):
@@ -58,10 +58,10 @@ class HICODataset(Dataset):
 
     def __getitem__(self, index) -> Tuple[torch.Tensor, torch.Tensor]:
         image_filename = self.image_filenames[index].item().item()
-        image = Image.open(Path(self.image_dir) / image_filename)
+        image = Image.open(Path(self.image_dir) / image_filename).convert('RGB')
         target = self.hoi_targets[:, index]
 
-        return self.transform(image), target
+        return self.transform(image), preprocess_targets_for_loss(target)
 
     def _create_hoi_classes(self, classes) -> Tuple[List[HOI], torch.LongTensor]:
         """Converts the supplied list of HOIs in the HICO dataset to a list of HOI objects. It takes into account
@@ -96,3 +96,17 @@ class HICODataset(Dataset):
         count_per_hoi = dict(zip(hoi_phrases, hoi_counts))
         sorted_count_per_hoi = {k: v for k, v in sorted(count_per_hoi.items(), key=lambda item: item[1], reverse=True)}
         return sorted_count_per_hoi
+
+
+def preprocess_targets_for_loss(target: torch.Tensor) -> torch.Tensor:
+    binary_target = torch.where(target == 1, 1., 0.)
+    return binary_target
+
+
+def get_training_transforms():
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        transforms.Resize(256),
+        transforms.RandomCrop(224)
+    ])
