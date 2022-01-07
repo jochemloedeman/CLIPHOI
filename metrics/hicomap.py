@@ -5,7 +5,7 @@ from typing import Tuple, Union, Dict
 from torchmetrics import Metric
 from torchmetrics.functional import retrieval_average_precision
 from torchmetrics.utilities.data import get_group_indexes
-from hico_dataset import HICODataset
+from datasets.hico_dataset import HICODataset
 
 
 class HICOmAP(Metric):

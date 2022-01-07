@@ -4,7 +4,7 @@ from pathlib import Path
 
 from torchvision import transforms
 
-from hico_dataset import HICODataset
+from datasets.hico_dataset import HICODataset
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load('ViT-B/32', device)
