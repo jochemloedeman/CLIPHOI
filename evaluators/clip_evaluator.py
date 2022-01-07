@@ -37,12 +37,20 @@ class CLIPEvaluator(object):
         """
         dataloader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=False)
 
-        for images, target in tqdm(dataloader):
-            text_inputs = torch.cat([clip.tokenize(f"a person {hoi.hoi_phrase}") for hoi in
-                                     self.dataset.hoi_classes]).to(self.device)
-            with torch.no_grad():
+        text_inputs = torch.cat([clip.tokenize(f"a photo of a person {hoi.hoi_phrase}") for hoi in
+                                 self.dataset.hoi_classes]).to(self.device)
+
+        with torch.no_grad():
+            for images, target in tqdm(dataloader):
                 logits_per_image, logits_per_text = self.model(images.to(self.device), text_inputs)
                 probs = logits_per_image.softmax(dim=-1)
                 self.metric.update(probs, target.to(self.device))
 
         self.final_metric = self.metric.compute()
+
+    @staticmethod
+    def _center_logits(logits):
+        mean_logit = torch.mean(logits, dim=1, keepdim=True)
+        centered_logits = logits - mean_logit
+        return centered_logits
+
