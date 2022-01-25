@@ -4,12 +4,20 @@ import torch.nn as nn
 
 class HICOResNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, pretrained=False):
         super(HICOResNet, self).__init__()
-        self.feature_extractor = models.resnet18(pretrained=False)
-        self.classifier = nn.Linear(1000, 520)
+        self.model = models.resnet50(pretrained)
+        self.model.fc = nn.Linear(2048, 520)
+
+        for params in self.model.parameters():
+            params.requires_grad = False
+        for params in self.model.fc.parameters():
+            params.requires_grad = True
 
     def forward(self, x):
-        features = self.feature_extractor(x)
-        logits = self.classifier(features)
+        logits = self.model(x)
         return logits
+
+
+if __name__ == '__main__':
+    hico_resnet = HICOResNet(pretrained=False)

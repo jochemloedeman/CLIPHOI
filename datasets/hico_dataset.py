@@ -6,8 +6,12 @@ import torch
 
 from pathlib import Path
 from PIL import Image
+from clip.clip import _convert_image_to_rgb, BICUBIC
 from torch.utils.data import Dataset
 from torchvision import transforms
+from torchvision.transforms import ToTensor, Normalize, FiveCrop, Lambda, Resize, RandomHorizontalFlip, Compose, \
+    CenterCrop
+from torchvision.transforms import InterpolationMode
 from hoi.hoi import HOI
 
 
@@ -60,8 +64,10 @@ class HICODataset(Dataset):
         image_filename = self.image_filenames[index].item().item()
         image = Image.open(Path(self.image_dir) / image_filename).convert('RGB')
         target = self.hoi_targets[:, index]
+        if self.train:
+            target = preprocess_targets_for_loss(target)
 
-        return self.transform(image), preprocess_targets_for_loss(target)
+        return self.transform(image), target
 
     def _create_hoi_classes(self, classes) -> Tuple[List[HOI], torch.LongTensor]:
         """Converts the supplied list of HOIs in the HICO dataset to a list of HOI objects. It takes into account
@@ -97,6 +103,12 @@ class HICODataset(Dataset):
         sorted_count_per_hoi = {k: v for k, v in sorted(count_per_hoi.items(), key=lambda item: item[1], reverse=True)}
         return sorted_count_per_hoi
 
+    def get_annotation_statistics(self) -> float:
+        mask_targets = torch.where(self.hoi_targets == 1, 1., 0.)
+        positives_per_image = torch.sum(mask_targets, dim=0)
+        average_positives = torch.mean(positives_per_image).item()
+        return average_positives
+
 
 def preprocess_targets_for_loss(target: torch.Tensor) -> torch.Tensor:
     binary_target = torch.where(target == 1, 1., 0.)
@@ -105,8 +117,39 @@ def preprocess_targets_for_loss(target: torch.Tensor) -> torch.Tensor:
 
 def get_training_transforms():
     return transforms.Compose([
+        ToTensor(),
+        RandomHorizontalFlip(),
+        Resize(256),
+        FiveCrop(224),
+        Lambda(lambda crops: torch.stack([crop for crop in crops])),
+        Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+
+def get_testing_transforms():
+    return transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        transforms.Resize(256),
-        transforms.RandomCrop(224)
+    ])
+
+
+def get_clip_transforms_five(n_px):
+    return Compose([
+        Resize(n_px, interpolation=BICUBIC),
+        # CenterCrop(n_px),
+        _convert_image_to_rgb,
+        ToTensor(),
+        FiveCrop(224),
+        Lambda(lambda crops: torch.stack([crop for crop in crops])),
+        Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+    ])
+
+
+def get_clip_transforms(n_px):
+    return Compose([
+        Resize(n_px, interpolation=BICUBIC),
+        # CenterCrop(n_px),
+        _convert_image_to_rgb,
+        ToTensor(),
+        Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
     ])
