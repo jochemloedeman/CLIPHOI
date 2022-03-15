@@ -45,11 +45,11 @@ class HICOmAP(Metric):
         For each update, indexes of equal shapes are added that identify the preds and targets to the corresponding
         HOI classes
         """
+        assert preds.shape == target.shape
+
         self.indexes.append(torch.arange(preds.shape[1]).repeat(preds.shape[0], 1))
         self.preds.append(preds)
         self.target.append(target)
-
-        assert preds.shape == target.shape
 
     def compute(self) -> torch.Tensor:
         """Computes the mean average precision from a Tensor containing the AP's per HOI"""

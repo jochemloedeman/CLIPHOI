@@ -1,17 +1,19 @@
 import pathlib
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Union
 
+import numpy as np
 import scipy.io
 import torch
 
 from pathlib import Path
+
 from PIL import Image
 from clip.clip import _convert_image_to_rgb, BICUBIC
 from torch.utils.data import Dataset
 from torchvision import transforms
-from torchvision.transforms import ToTensor, Normalize, FiveCrop, Lambda, Resize, RandomHorizontalFlip, Compose, \
-    CenterCrop
-from torchvision.transforms import InterpolationMode
+from torchvision.transforms import ToTensor, Normalize, FiveCrop, Lambda, \
+    Resize, RandomHorizontalFlip, Compose, CenterCrop
+
 from hoi.hoi import HOI
 
 
@@ -37,12 +39,14 @@ class HICODataset(Dataset):
     no_interaction_verb = 'no_interaction'
 
     def __init__(self, hico_root_dir: pathlib.Path, transform: transforms.Compose = None,
-                 train: bool = True, exclude_no_interaction: bool = False) -> None:
+                 train: bool = True, exclude_no_interaction: bool = False,
+                 save_predictions: bool = False) -> None:
 
         self.hico_root_dir = hico_root_dir
-        self.transform = transform if transform is not None else transforms.Compose([transforms.ToTensor()])
+        self.transform = transform if transform is not None else transforms.Compose([])
         self.train = train
         self.exclude_no_interaction = exclude_no_interaction
+        self.save_predictions = save_predictions
 
         self.subset = 'train' if self.train else 'test'
         self.image_dir = self.hico_root_dir / f'images/{self.subset}2015'
@@ -60,14 +64,28 @@ class HICODataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_filenames)
 
-    def __getitem__(self, index) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index) -> Union[Tuple[Image.Image, torch.Tensor, torch.Tensor],
+                                          Tuple[torch.Tensor, torch.Tensor]]:
+
         image_filename = self.image_filenames[index].item().item()
         image = Image.open(Path(self.image_dir) / image_filename).convert('RGB')
         target = self.hoi_targets[:, index]
-        if self.train:
-            target = preprocess_targets_for_loss(target)
 
-        return self.transform(image), target
+        if self.save_predictions:
+            return image, self.transform(image), target
+        else:
+            return self.transform(image), target
+
+    def to_positive_classes(self, binary_target):
+        indices_array, = np.nonzero(binary_target.squeeze().cpu().numpy())
+        class_indices = indices_array.tolist()
+        classes = [self.hoi_classes[index].hoi_phrase for index in class_indices]
+        return classes
+
+    def create_hoi_dict(self, tensor):
+        hoi_phrases = [hoi_class.hoi_phrase for hoi_class in self.hoi_classes]
+        hoi_dict = dict(zip(hoi_phrases, tensor.squeeze().cpu().tolist()))
+        return hoi_dict
 
     def _create_hoi_classes(self, classes) -> Tuple[List[HOI], torch.LongTensor]:
         """Converts the supplied list of HOIs in the HICO dataset to a list of HOI objects. It takes into account
@@ -126,30 +144,33 @@ def get_training_transforms():
     ])
 
 
-def get_testing_transforms():
+def get_training_transforms_2():
     return transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        transforms.Resize(256),
+        transforms.RandomCrop(224)
     ])
 
 
-def get_clip_transforms_five(n_px):
-    return Compose([
-        Resize(n_px, interpolation=BICUBIC),
-        # CenterCrop(n_px),
-        _convert_image_to_rgb,
-        ToTensor(),
-        FiveCrop(224),
-        Lambda(lambda crops: torch.stack([crop for crop in crops])),
-        Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-    ])
+def get_testing_transforms(resolution=224, normalize=True, center_crop=False, five_crop=False):
+    transformations = [Resize(resolution, interpolation=BICUBIC),
+                       _convert_image_to_rgb,
+                       ToTensor()]
 
+    if center_crop:
+        transformations.append(
+            CenterCrop(resolution)
+        )
 
-def get_clip_transforms(n_px):
-    return Compose([
-        Resize(n_px, interpolation=BICUBIC),
-        # CenterCrop(n_px),
-        _convert_image_to_rgb,
-        ToTensor(),
-        Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-    ])
+    if five_crop:
+        transformations.extend(
+            [FiveCrop(224), Lambda(lambda crops: torch.stack([crop for crop in crops]))]
+        )
+
+    if normalize:
+        transformations.append(
+            Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        )
+
+    return Compose(transformations)

@@ -76,15 +76,19 @@ class ModelTrainer:
         for i, data in enumerate(self.training_loader):
             # Every data instance is an input + label pair
             inputs, labels = data[0].to(self.device), data[1].to(self.device)
-            bs, ncrops, c, h, w = inputs.size()
+            labels = preprocess_targets_for_loss(labels)
+            # bs, ncrops, c, h, w = inputs.size()
             # Zero your gradients for every batch!
             self.optimizer.zero_grad()
 
             # Make predictions for this batch
-            outputs = self.model(inputs.view(-1, c, h, w))
-            outputs_averaged = outputs.view(bs, ncrops, -1).mean(1)
+            # outputs = self.model(inputs.view(-1, c, h, w))
+            # outputs_averaged = outputs.view(bs, ncrops, -1).mean(1)
+            preds = self.model(inputs)
             # Compute the loss and its gradients
-            loss = self.loss_module(outputs_averaged, labels)
+            # loss = self.loss_module(outputs_averaged, labels)
+            loss = self.loss_module(preds, labels)
+
             loss.backward()
 
             # Adjust learning weights

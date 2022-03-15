@@ -11,7 +11,7 @@ from models.resnet_hico_classifier import HICOResNet
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 hico_test_set = HICODataset(Path('data/hico_20150920'),
                             train=False,
-                            transform=get_testing_transforms(),
+                            transform=get_testing_transforms(center_crop=True),
                             exclude_no_interaction=True)
 
 hico_test_loader = DataLoader(hico_test_set, batch_size=1, shuffle=False)
@@ -23,4 +23,5 @@ map_metric = HICOmAP(hico_test_set)
 
 evaluator = MultiLabelModelEvaluator(model, hico_test_loader, map_metric, device)
 map = evaluator.evaluate()
+map_metric.export_to_json('evaluation_report_resnet.json')
 print(map)

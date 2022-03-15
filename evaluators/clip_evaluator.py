@@ -1,19 +1,30 @@
+import functools
 import math
-from time import time
+import pickle
+from collections import Counter
+from pathlib import Path
+from pprint import pprint
 
 import clip
 import torch
 import torchmetrics
+
 from torch.nn.functional import interpolate
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, ToTensor, Normalize, Resize, FiveCrop, Lambda
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
+from datasets.hico_dataset import preprocess_targets_for_loss
+from util.hico_probe import Prediction, prob_based_renorm, prob_based_tensor, logit_based_tensor
+
 
 class CLIPEvaluator(object):
+
     def __init__(self, dataset: Dataset, metric: torchmetrics.Metric,
-                 backbone: str, device: str, batch_size: int, ir_threshold: float) -> None:
+                 backbone: str, device: str, batch_size: int,
+                 prob_fn: str, center_crop: bool, five_crop: bool,
+                 ir_threshold: float, save_predictions: bool,
+                 include_image: bool) -> None:
         """
         Class that is intended for evaluating OpenAI's CLIP (https://github.com/openai/CLIP) on a PyTorch Dataset,
         with a given TorchMetrics metric
@@ -33,27 +44,100 @@ class CLIPEvaluator(object):
         self.dataset = dataset
         self.metric = metric
         self.batch_size = batch_size
+        self.prob_fn = prob_fn
+        self.center_crop = center_crop
+        self.five_crop = five_crop
         self.ir_threshold = ir_threshold
+        self.save_predictions = save_predictions
+        self.include_image = include_image
         self.final_metric = None
 
+        self.prob_fn_matcher = {
+            "softmax": functools.partial(torch.softmax, dim=-1),
+            "sigmoid": torch.sigmoid,
+            "prob_based_greater": functools.partial(prob_based_tensor, mode="prob_based_greater",
+                                                    threshold=self.ir_threshold),
+            "prob_based_smaller": functools.partial(prob_based_tensor, mode="smaller",
+                                                    threshold=self.ir_threshold),
+            "logit_based": functools.partial(logit_based_tensor, threshold=self.ir_threshold),
+            "ir_softmax": None
+        }
+
     def evaluate(self) -> None:
+        if self.save_predictions:
+            self._evaluate_with_saving()
+        else:
+            self._evaluate_map()
+
+    @torch.no_grad()
+    def _evaluate_map(self) -> None:
         """Iterates through a DataLoader that is created from the given Dataset.
         In each iteration, the images are passed through the CLIP image encoder. The resulting embeddings are then
         compared to the HOI class embeddings to obtain logits per image. A distribution over the HOI classes is
         computed using a softmax.
         """
         dataloader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=False)
+        text_inputs = torch.cat([clip.tokenize(f"a person {hoi.hoi_phrase}") for hoi in
+                                 self.dataset.hoi_classes]).to(self.device)
+
+        text_features = self.model.encode_text(text_inputs)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        prob_fn = self.prob_fn_matcher[self.prob_fn]
+
+        logit_statistics = Counter()
+        for images, target in tqdm(dataloader):
+
+            if self.five_crop:
+                batch_size, nr_of_crops, channels, height, width = images.size()
+                image_features = self.model.encode_image(images.to(self.device).view(-1, channels, height, width))
+                image_features = image_features.view(batch_size, nr_of_crops, -1).mean(1)
+            else:
+                image_features = self.model.encode_image(images.to(self.device))
+
+            # normalized features
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+            logit_scale = self.model.logit_scale.exp()
+            logits_per_image = logit_scale * image_features @ text_features.t()
+            update_logit_statistics(logit_statistics, logits_per_image, target)
+            probs = prob_fn(logits_per_image)
+            self.metric.update(probs, target.to(self.device))
+
+        self.final_metric = self.metric.compute()
+        logit_statistics = {position: logit_statistics[position] / len(self.dataset) for position in
+                            logit_statistics.keys()}
+        pprint(logit_statistics)
+
+    @torch.no_grad()
+    def _evaluate_with_saving(self) -> None:
+        """Iterates through a DataLoader that is created from the given Dataset.
+        In each iteration, the images are passed through the CLIP image encoder. The resulting embeddings are then
+        compared to the HOI class embeddings to obtain logits per image. A distribution over the HOI classes is
+        computed using a softmax.
+        """
+        dataloader = DataLoader(self.dataset, batch_size=self.batch_size,
+                                shuffle=False, collate_fn=custom_collate)
 
         text_inputs = torch.cat([clip.tokenize(f"a person {hoi.hoi_phrase}") for hoi in
                                  self.dataset.hoi_classes]).to(self.device)
 
-        with torch.no_grad():
-            for images, target in tqdm(dataloader):
-                # logits_per_image, logits_per_text = self.model.forward(images.to(self.device), text_inputs)
-                # probs = logits_per_image.softmax(dim=-1)
+        text_features = self.model.encode_text(text_inputs)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        prob_fn = self.prob_fn_matcher[self.prob_fn]
 
-                image_features = self.model.encode_image(images.to(self.device))
-                text_features = self.model.encode_text(text_inputs)
+        predictions = []
+        for batch_index, batch in enumerate(tqdm(dataloader)):
+            for pil_image, image_tensor, target in batch:
+
+                binary_target = preprocess_targets_for_loss(target)
+
+                if self.five_crop:
+                    batch_size, nr_of_crops, channels, height, width = image_tensor.size()
+                    image_features = self.model.encode_image(
+                        image_tensor.to(self.device).view(-1, channels, height, width))
+                    image_features = image_features.view(1, nr_of_crops, -1).mean(1)
+                else:
+                    image_features = self.model.encode_image(image_tensor.to(self.device))
 
                 # normalized features
                 image_features = image_features / image_features.norm(dim=-1, keepdim=True)
@@ -61,42 +145,21 @@ class CLIPEvaluator(object):
 
                 logit_scale = self.model.logit_scale.exp()
                 logits_per_image = logit_scale * image_features @ text_features.t()
-                probs = torch.softmax(logits_per_image, dim=-1)
-                # probs = to_probabilities_by_distance(logits_per_image, max_offset=0.03)
-                # print(end_time - start_time)
+
+                probs = prob_fn(logits_per_image)
+
+                predictions.append(
+                    Prediction(logits_dict=self.dataset.create_hoi_dict(logits_per_image),
+                               raw_target=target,
+                               target_string=self.dataset.to_positive_classes(binary_target),
+                               probabilities=self.dataset.create_hoi_dict(probs),
+                               binary_target=binary_target,
+                               image=pil_image if self.include_image else None)
+                )
+
                 self.metric.update(probs, target.to(self.device))
 
-        self.final_metric = self.metric.compute()
-
-    @torch.no_grad()
-    def evaluate_in_batches(self, batch_size) -> None:
-        """Iterates through a DataLoader that is created from the given Dataset.
-        In each iteration, the images are passed through the CLIP image encoder. The resulting embeddings are then
-        compared to the HOI class embeddings to obtain logits per image. A distribution over the HOI classes is
-        computed using a softmax.
-        """
-        dataloader = DataLoader(self.dataset, batch_size=batch_size,
-                                shuffle=False, collate_fn=custom_collate)
-
-        text_inputs = torch.cat([clip.tokenize(f"a person {hoi.hoi_phrase}") for hoi in
-                                 self.dataset.hoi_classes]).to(self.device)
-        text_features = self.model.encode_text(text_inputs)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        for batch in tqdm(dataloader):
-            for image, target in batch:
-
-                image_features = self.model.encode_image(image.to(self.device))
-                # normalized features
-                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-
-                logit_scale = self.model.logit_scale.exp()
-                logits_per_image = logit_scale * image_features @ text_features.t()
-                probs = torch.softmax(logits_per_image, dim=-1)
-                # probs = to_probabilities_by_distance(logits_per_image, max_offset=0.03)
-                # print(end_time - start_time)
-                self.metric.update(probs, target.to(self.device))
-
+        save_predictions(predictions, Path(__file__).parents[1] / "predictions.pkl")
         self.final_metric = self.metric.compute()
 
 
@@ -106,12 +169,24 @@ def center_logits(logits):
     return centered_logits
 
 
+def update_logit_statistics(counter, logits, target):
+    processed_target = preprocess_targets_for_loss(target).squeeze()
+    sorted_indices = torch.argsort(logits, descending=True).cpu()
+    sorted_target = processed_target[sorted_indices].squeeze()
+    for i in range(15):
+        if sorted_target[i] == 1.:
+            counter[str(i)] += 1
+
+
+def save_predictions(predictions, path):
+    pickle.dump(predictions, open(path, 'wb'))
+
+
 def to_probabilities_by_threshold(logits, prob_threshold):
     # sort the original logits
     sorted_logits, sorted_indices = torch.sort(logits, dim=1, descending=True)
     # obtain original probabilities
     probabilities = logits.softmax(dim=-1)
-    max_probs = torch.max(probabilities, dim=1).values
     # obtain indices corresponding to all but the largest logits
     sorted_indices = sorted_indices[:, 1:]
     # and corresponding probabilities
@@ -123,16 +198,16 @@ def to_probabilities_by_threshold(logits, prob_threshold):
     assert torch.equal(top_prob, torch.max(new_probabilities, dim=1).values)
 
     # get batch indices for which the largest prob exceeds the threshold
-    exceeds_threshold = top_prob > prob_threshold
+    exceeds_threshold = top_prob < prob_threshold
 
     if torch.any(exceeds_threshold):
         for batch_index in torch.nonzero(exceeds_threshold):
-            # get indices, top prob and new probs corresponding to index\
+            # get indices, top prob and new probs corresponding to index
             sample_logits = logits[batch_index].squeeze()
             sample_indices = sorted_indices[batch_index].squeeze()
             sample_probs = new_probabilities[batch_index].squeeze()
 
-            while sample_probs[0] > prob_threshold:
+            while sample_probs[0] < prob_threshold:
                 probabilities[batch_index, sample_indices[0]] = sample_probs[0]
                 sample_indices = sample_indices[1:]
                 sample_probs = sample_logits[sample_indices].softmax(dim=-1)
@@ -166,10 +241,7 @@ def to_probabilities_by_distance(logits, max_offset):
 
 
 def custom_collate(batch):
-    # data = [item[0] for item in batch]
-    # target = [item[1] for item in batch]
-    # return [data, target]
-    batch = [(image.unsqueeze(0), target.unsqueeze(0)) for image, target in batch]
+    batch = [(image, image_tensor.unsqueeze(0), target.unsqueeze(0)) for image, image_tensor, target in batch]
     return batch
 
 
