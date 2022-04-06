@@ -1,19 +1,15 @@
 import pathlib
-from typing import Tuple, List, Dict, Union
-
 import numpy as np
 import scipy.io
 import torch
-
 from pathlib import Path
-
+from typing import Tuple, List, Dict, Union
 from PIL import Image
 from clip.clip import _convert_image_to_rgb, BICUBIC
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms import ToTensor, Normalize, FiveCrop, Lambda, \
     Resize, RandomHorizontalFlip, Compose, CenterCrop
-
 from hoi.hoi import HOI
 
 
