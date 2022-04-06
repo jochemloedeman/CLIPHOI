@@ -1,21 +1,18 @@
 import functools
 import math
 import pickle
-from collections import Counter
-from pathlib import Path
-from pprint import pprint
-
 import clip
 import torch
 import torchmetrics
-
+from collections import Counter
+from pathlib import Path
+from pprint import pprint
 from torch.nn.functional import interpolate
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from torch.utils.data import Dataset
-
 from datasets.hico_dataset import preprocess_targets_for_loss
-from util.hico_probe import Prediction, prob_based_renorm, prob_based_tensor, logit_based_tensor
+from util.hico_probe import Prediction, prob_based_tensor, logit_based_tensor
 
 
 class CLIPEvaluator(object):
