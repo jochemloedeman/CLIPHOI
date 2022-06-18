@@ -34,30 +34,44 @@ parser.add_argument('--save_predictions', default=False, type=bool,
 parser.add_argument('--include_image', default=False, type=bool,
                     help='Save predictions for inspection')
 
-
 args = parser.parse_args()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-testing_transforms = get_testing_transforms(resolution=args.resolution,
-                                            normalize=args.normalize,
-                                            center_crop=args.center_crop,
-                                            five_crop=args.five_crop)
+testing_transforms = get_testing_transforms(
+    resolution=args.resolution,
+    normalize=args.normalize,
+    center_crop=args.center_crop,
+    five_crop=args.five_crop
+)
 
-hico_dataset = HICODataset(Path(__file__).parent / 'data' / 'hico_20150920',
-                           train=args.train,
-                           transform=testing_transforms,
-                           exclude_no_interaction=args.exclude_no_interaction,
-                           save_predictions=args.save_predictions)
+hico_dataset = HICODataset(
+    Path(__file__).parent / 'data' / 'hico_20150920',
+    train=args.train,
+    transform=testing_transforms,
+    exclude_no_interaction=args.exclude_no_interaction,
+    save_predictions=args.save_predictions
+)
 
-hico_map = HICOmAP(hico_dataset=hico_dataset, known_object_mode=args.ko).to(device)
+hico_map = HICOmAP(
+    hico_dataset=hico_dataset,
+    known_object_mode=args.ko
+).to(device)
 
-evaluator = CLIPEvaluator(device=device, dataset=hico_dataset,
-                          backbone=args.backbone, metric=hico_map,
-                          batch_size=args.batch_size, prob_fn=args.prob_fn,
-                          ir_threshold=args.ir_threshold, five_crop=args.five_crop,
-                          center_crop=args.center_crop, save_predictions=args.save_predictions,
-                          include_image=args.include_image)
+evaluator = CLIPEvaluator(
+    device=device,
+    dataset=hico_dataset,
+    backbone=args.backbone,
+    metric=hico_map,
+    batch_size=args.batch_size,
+    prob_fn=args.prob_fn,
+    ir_threshold=args.ir_threshold,
+    five_crop=args.five_crop,
+    center_crop=args.center_crop,
+    save_predictions=args.save_predictions,
+    include_image=args.include_image
+)
+
 evaluator.evaluate()
 
 print(evaluator.final_metric.item())

@@ -1,12 +1,23 @@
+from typing import List
+
 import inflect
 
 
 class HOI(object):
-    """Class that captures the relevant information of a Human-Object Interaction"""
+    """Class that captures the relevant information of a Human-Object
+    Interaction """
     vowel_letters = ('a', 'u', 'e', 'i', 'o')
     no_interaction_string = 'no_interaction'
 
-    def __init__(self, noun, verb, verb_ing, synonyms, definition, noun_is_plural) -> None:
+    def __init__(
+            self,
+            noun: str,
+            verb: str,
+            verb_ing: str,
+            synonyms: List[str],
+            definition: str,
+            noun_is_plural: bool
+    ) -> None:
 
         self.noun = noun.replace('_', ' ')
         self.noun_is_plural = noun_is_plural
